@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    /* The study screen is a drag surface; stop iOS treating a horizontal
+       drag as a page swipe or a long-press as a text selection. */
+    overscroll-behavior-y: contain;
+  }
+}
+
+@layer utilities {
+  /* Two-sided card: the faces are stacked and the wrapper is rotated. */
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+  .backface-hidden {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .rotate-y-180 {
+    transform: rotateY(180deg);
+  }
+  .perspective {
+    perspective: 1400px;
+  }
+}
