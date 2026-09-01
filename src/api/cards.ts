@@ -1,5 +1,5 @@
 import { supabase } from "@/app/lib/supabase";
-import { type Card, type Side, toCard } from "@/types/cards";
+import { type Card, type DeckEntry, type Side, toCard, toDeckEntry } from "@/types/cards";
 
 export interface CardInput {
   english: string;
@@ -66,20 +66,38 @@ export async function deleteCard(id: string): Promise<void> {
   if (error) throw new Error(`Failed to delete card: ${error.message}`);
 }
 
+export interface DeckOptions {
+  deckSize?: number;
+  /** Cap on unseen cards in one deck, so new material can't swamp a session. */
+  newLimit?: number;
+  /** Directions to draw from. Both = the deck picks the weaker one per card. */
+  sides?: Side[];
+}
+
 /**
- * Build a study deck. The ordering lives in the `study_deck` SQL function so
- * the scheduling algorithm can be changed without touching the app.
+ * Build a study deck. Both the weighting and the choice of direction live in
+ * the `study_deck` SQL function — see 008_study_deck.sql for the algorithm.
+ * The app deliberately does no ordering of its own beyond in-session requeues.
  */
-export async function getStudyDeck(deckSize = 20): Promise<Card[]> {
-  const { data, error } = await supabase.rpc("study_deck", { deck_size: deckSize });
+export async function getStudyDeck({
+  deckSize = 20,
+  newLimit = 5,
+  sides = ["english", "spanish"],
+}: DeckOptions = {}): Promise<DeckEntry[]> {
+  const { data, error } = await supabase.rpc("study_deck", {
+    deck_size: deckSize,
+    new_limit: newLimit,
+    sides,
+  });
   if (error) throw new Error(`Failed to build deck: ${error.message}`);
-  return (data ?? []).map(toCard);
+  return (data ?? []).map(toDeckEntry);
 }
 
 export async function recordReview(
   cardId: string,
   knew: boolean,
   promptSide: Side,
+  responseMs?: number,
 ): Promise<void> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) throw new Error("Not signed in");
@@ -89,6 +107,10 @@ export async function recordReview(
     user_id: auth.user.id,
     knew,
     prompt_side: promptSide,
+    // Clamped: a card left open in a backgrounded tab would otherwise record
+    // an hour-long "response" and poison the timing data.
+    response_ms:
+      responseMs === undefined ? null : Math.min(Math.round(responseMs), 120_000),
   });
   if (error) throw new Error(`Failed to record review: ${error.message}`);
 }

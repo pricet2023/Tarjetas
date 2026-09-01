@@ -40,6 +40,7 @@ export type Database = {
           id: string
           knew: boolean
           prompt_side: string
+          response_ms: number | null
           reviewed_at: string
           user_id: string
         }
@@ -48,6 +49,7 @@ export type Database = {
           id?: string
           knew: boolean
           prompt_side: string
+          response_ms?: number | null
           reviewed_at?: string
           user_id: string
         }
@@ -56,12 +58,51 @@ export type Database = {
           id?: string
           knew?: boolean
           prompt_side?: string
+          response_ms?: number | null
           reviewed_at?: string
           user_id?: string
         }
         Relationships: [
           {
             foreignKeyName: "card_reviews_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      card_state: {
+        Row: {
+          card_id: string
+          lapses: number
+          last_reviewed_at: string | null
+          prompt_side: string
+          reps: number
+          streak: number
+          user_id: string
+        }
+        Insert: {
+          card_id: string
+          lapses?: number
+          last_reviewed_at?: string | null
+          prompt_side: string
+          reps?: number
+          streak?: number
+          user_id: string
+        }
+        Update: {
+          card_id?: string
+          lapses?: number
+          last_reviewed_at?: string | null
+          prompt_side?: string
+          reps?: number
+          streak?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_state_card_id_fkey"
             columns: ["card_id"]
             isOneToOne: false
             referencedRelation: "cards"
@@ -108,31 +149,43 @@ export type Database = {
         }
         Relationships: []
       }
+      word_frequency: {
+        Row: {
+          word: string
+          zipf: number
+        }
+        Insert: {
+          word: string
+          zipf: number
+        }
+        Update: {
+          word?: string
+          zipf?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      phrase_zipf: { Args: { phrase: string }; Returns: number }
       study_deck: {
-        Args: { deck_size?: number }
+        Args: { deck_size?: number; new_limit?: number; sides?: string[] }
         Returns: {
           created_at: string
           english: string
           id: string
-          last_seen_at: string | null
-          notes: string | null
+          is_new: boolean
+          last_seen_at: string
+          notes: string
+          prompt_side: string
           spanish: string
           times_known: number
           times_seen: number
           updated_at: string
-          user_id: string
+          weight: number
         }[]
-        SetofOptions: {
-          from: "*"
-          to: "cards"
-          isOneToOne: false
-          isSetofReturn: true
-        }
       }
     }
     Enums: {

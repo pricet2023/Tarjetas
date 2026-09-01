@@ -31,9 +31,16 @@ supabase/functions/   Deno edge functions
 
 ## Things that are load-bearing
 
-- **The deck ordering lives in SQL** (`study_deck` in 004). That's the seam for
-  a future spaced-repetition algorithm — keep it there rather than sorting in
-  the client.
+- **The deck weighting lives in SQL** (`study_deck` in 008): `weight = urgency
+  x utility`, sampled with an exponential race rather than ranked. Keep it
+  there rather than sorting in the client — the client's only ordering role is
+  the in-session requeue of failed cards (`src/app/lib/session-queue.ts`).
+- **`card_state` is keyed on (card_id, prompt_side)**, not card_id. The two
+  directions are separate skills and are scheduled separately.
+- **`streak`, not the times_known/times_seen ratio**, drives the interval. The
+  ratio on `public.cards` is for display only; the two are not the same number.
+- **Migration 005 is generated.** Rerun `scripts/gen-word-frequency.py` rather
+  than editing the 0.5 MB of INSERTs by hand.
 - **`card_reviews` is append-only.** No update/delete policy exists. It's the
   training data for the scheduling algorithm.
 - The `cards_set_updated_at` trigger is scoped to the content columns so the
