@@ -39,27 +39,33 @@ export type Database = {
           card_id: string
           id: string
           knew: boolean
+          phone_scores: Json | null
           prompt_side: string
           response_ms: number | null
           reviewed_at: string
+          score: number | null
           user_id: string
         }
         Insert: {
           card_id: string
           id?: string
           knew: boolean
+          phone_scores?: Json | null
           prompt_side: string
           response_ms?: number | null
           reviewed_at?: string
+          score?: number | null
           user_id: string
         }
         Update: {
           card_id?: string
           id?: string
           knew?: boolean
+          phone_scores?: Json | null
           prompt_side?: string
           response_ms?: number | null
           reviewed_at?: string
+          score?: number | null
           user_id?: string
         }
         Relationships: [
@@ -68,6 +74,13 @@ export type Database = {
             columns: ["card_id"]
             isOneToOne: false
             referencedRelation: "cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_reviews_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards_with_progress"
             referencedColumns: ["id"]
           },
         ]
@@ -80,6 +93,7 @@ export type Database = {
           prompt_side: string
           reps: number
           streak: number
+          times_known: number
           user_id: string
         }
         Insert: {
@@ -89,6 +103,7 @@ export type Database = {
           prompt_side: string
           reps?: number
           streak?: number
+          times_known?: number
           user_id: string
         }
         Update: {
@@ -98,6 +113,7 @@ export type Database = {
           prompt_side?: string
           reps?: number
           streak?: number
+          times_known?: number
           user_id?: string
         }
         Relationships: [
@@ -108,44 +124,99 @@ export type Database = {
             referencedRelation: "cards"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "card_state_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards_with_progress"
+            referencedColumns: ["id"]
+          },
         ]
       }
       cards: {
         Row: {
           created_at: string
+          created_by: string | null
           english: string
           id: string
-          last_seen_at: string | null
           notes: string | null
           spanish: string
-          times_known: number
-          times_seen: number
           updated_at: string
-          user_id: string
         }
         Insert: {
           created_at?: string
+          created_by?: string | null
           english: string
           id?: string
-          last_seen_at?: string | null
           notes?: string | null
           spanish: string
-          times_known?: number
-          times_seen?: number
           updated_at?: string
-          user_id: string
         }
         Update: {
           created_at?: string
+          created_by?: string | null
           english?: string
           id?: string
-          last_seen_at?: string | null
           notes?: string | null
           spanish?: string
-          times_known?: number
-          times_seen?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      phone_state: {
+        Row: {
+          attempts: number
+          gop_sq_sum: number
+          gop_sum: number
+          hits: number
+          last_scored_at: string | null
+          misses: number
+          nears: number
+          phone: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          gop_sq_sum?: number
+          gop_sum?: number
+          hits?: number
+          last_scored_at?: string | null
+          misses?: number
+          nears?: number
+          phone: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          gop_sq_sum?: number
+          gop_sum?: number
+          hits?: number
+          last_scored_at?: string | null
+          misses?: number
+          nears?: number
+          phone?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      phrase_phones: {
+        Row: {
+          created_at: string
+          g2p_version: number
+          phones: string[]
+          phrase: string
+        }
+        Insert: {
+          created_at?: string
+          g2p_version?: number
+          phones: string[]
+          phrase: string
+        }
+        Update: {
+          created_at?: string
+          g2p_version?: number
+          phones?: string[]
+          phrase?: string
         }
         Relationships: []
       }
@@ -166,9 +237,54 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      card_progress: {
+        Row: {
+          card_id: string | null
+          last_seen_at: string | null
+          times_known: number | null
+          times_seen: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_state_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_state_card_id_fkey"
+            columns: ["card_id"]
+            isOneToOne: false
+            referencedRelation: "cards_with_progress"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cards_with_progress: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          english: string | null
+          id: string | null
+          last_seen_at: string | null
+          notes: string | null
+          spanish: string | null
+          times_known: number | null
+          times_seen: number | null
+          updated_at: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      phone_ability: {
+        Args: never
+        Returns: {
+          ability: number
+          phone: string
+        }[]
+      }
       phrase_zipf: { Args: { phrase: string }; Returns: number }
       study_deck: {
         Args: { deck_size?: number; new_limit?: number; sides?: string[] }

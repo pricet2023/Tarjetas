@@ -13,6 +13,7 @@ if (!supabaseAnonKey) {
 }
 
 // Supabase Auth owns the session; supabase-js persists it to localStorage and
-// attaches the JWT to every PostgREST and Edge Function call, which is what
-// the `user_id = auth.uid()` RLS policies key off.
+// attaches the JWT to every PostgREST and Edge Function call. That JWT is what
+// the RLS policies key off — being signed in at all gets you the shared deck,
+// and `auth.uid()` picks out your own progress within it.
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);

@@ -1,0 +1,8 @@
+{
+  "id": "wav2vec2-xlsr-53-espeak-cv-ft-q4f16",
+  "weights": "https://huggingface.co/qnighy/wav2vec2-xlsr-53-espeak-cv-ft-ONNX/resolve/main/onnx/model_q4f16.onnx",
+  "labels": "https://huggingface.co/qnighy/wav2vec2-xlsr-53-espeak-cv-ft-ONNX/resolve/main/vocab.json",
+  "bytes": 196651670,
+  "sampleRate": 16000,
+  "padToken": "<pad>"
+}
