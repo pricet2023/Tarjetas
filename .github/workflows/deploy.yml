@@ -1,0 +1,161 @@
+# Deploy to production on a push to `prod`.
+#
+# The branch is the trigger and the gate: `master` is where work happens and
+# nothing here runs for it. Promote with `git push origin master:prod`.
+#
+# Order matters. Migrations go first, because the bundle that follows expects
+# the schema they create — a web deploy that lands before its migration is a
+# broken app for however long the database takes.
+#
+# Secrets this needs (repo → Settings → Secrets and variables → Actions):
+#
+#   SUPABASE_ACCESS_TOKEN   supabase.com/dashboard/account/tokens
+#   SUPABASE_PROJECT_REF    the ref in your project's URL
+#   SUPABASE_DB_PASSWORD    the database password you set at project creation
+#   VERCEL_TOKEN            vercel.com/account/tokens
+#   VERCEL_ORG_ID           from `.vercel/project.json` after `vercel link`
+#   VERCEL_PROJECT_ID       likewise
+#
+# VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are *not* here: they live in
+# Vercel's own project env vars, which `vercel pull` fetches below. The anon
+# key is designed to be public — it ships in the bundle either way — so there
+# is nothing gained by routing it through GitHub secrets as well, and one less
+# place for the two copies to disagree.
+
+name: Deploy
+
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+
+# Never let two deploys race a migration against each other.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Typecheck, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The acoustic model, cached across runs. 197 MB, so the first run pays
+      # for it and the rest do not.
+      #
+      # This is not optional thoroughness. `gop.integration.test.ts` and
+      # `session.integration.test.ts` are `describe.skipIf` on `.models/`
+      # being present, so without the weights they *silently skip* — and they
+      # are the only tests that check the model still decodes, that the
+      # calibration matches the build, and that /r/ and /ɾ/ are still
+      # separable. A suite that skips its real checks when an artefact is
+      # missing reports green on the day the artefact goes away. That has
+      # already happened once in this repo.
+      - name: Cache acoustic model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: .models
+          key: acoustic-${{ hashFiles('src/app/lib/acoustic/model-source.json') }}
+
+      - name: Fetch acoustic model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: npm run model:fetch
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+      # Proof the integration suites actually ran rather than skipping.
+      - name: Assert the model-backed tests were not skipped
+        run: |
+          npx vitest run src/app/lib/phonology/gop.integration.test.ts \
+            --reporter=json --outputFile=/tmp/gop.json
+          node -e '
+            const r = require("/tmp/gop.json");
+            if (!r.numTotalTests || r.numPassedTests < r.numTotalTests) {
+              console.error("Integration tests did not all run:", r.numPassedTests, "/", r.numTotalTests);
+              process.exit(1);
+            }
+            console.log("gop integration:", r.numPassedTests, "passed");
+          '
+
+  database:
+    name: Migrations and edge functions
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link the project
+        run: supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      # Forward-only, so this only ever applies migrations the project has not
+      # seen. There is no `db reset` here and there must never be: it would
+      # drop the deck and, with it, every review either of you has recorded.
+      - name: Apply migrations
+        run: supabase db push
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      - name: Deploy edge functions
+        run: supabase functions deploy translate
+
+      # The deck is shared: `shared_delete` is `USING (true)`, so *any* signed-in
+      # user can delete *any* card. That is the right policy for two people
+      # learning together and the wrong one for a project anyone can sign up to,
+      # so signup being closed is load-bearing rather than a preference.
+      #
+      # Checked against the Management API rather than trusted to a dashboard
+      # toggle someone may have flipped back while debugging a login.
+      - name: Assert public signup is disabled
+        run: |
+          config=$(curl -sS -f \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/${{ secrets.SUPABASE_PROJECT_REF }}/config/auth")
+          disabled=$(echo "$config" | node -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).disable_signup))')
+          echo "disable_signup = $disabled"
+          if [ "$disabled" != "true" ]; then
+            echo "::error::Public signup is ENABLED on the production project."
+            echo "::error::Anyone who finds the URL can sign up and delete the whole deck."
+            echo "::error::Dashboard → Authentication → Sign In / Providers → disable 'Allow new users to sign up'."
+            exit 1
+          fi
+
+  web:
+    name: Build and deploy the app
+    needs: database
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm i -g vercel@latest
+
+      # `vercel pull` brings down the project's production env vars, so the
+      # build gets VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY from Vercel.
+      - run: vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+      - run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      - run: vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"

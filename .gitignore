@@ -5,3 +5,15 @@ dist
 supabase/.branches
 supabase/.temp
 *.tsbuildinfo
+
+# Acoustic model weights, downloaded by scripts/fetch-acoustic-model.mjs
+.models
+
+# Corpus audio + the FLEURS archive, cached by scripts/gen-native-stats.mjs
+.cache
+
+# Vercel CLI local link + pulled env vars. Contains project ids and, after
+# `vercel pull`, the project's environment variables.
+.vercel
+.venv
+verbecc.log

@@ -1,0 +1,28 @@
+# Checks on everything that isn't a production deploy.
+#
+# Same three commands as `npm run` locally, minus the model: the integration
+# suites skip without `.models/`, which is the right trade for a check that
+# runs on every push. The deploy workflow fetches the weights and asserts
+# those suites actually ran — that is the gate that matters.
+
+name: CI
+
+on:
+  push:
+    branches-ignore: [prod]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
