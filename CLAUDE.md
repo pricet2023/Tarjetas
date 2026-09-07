@@ -7,6 +7,11 @@ by GitHub Actions on a push to `prod`. See `docs/deploying.md`.
 - Work on `main`. `prod` is the deploy trigger — `git push origin main:prod`.
 - **`supabase db push`, never `db reset`, against production.** Reset drops the
   deck and every review with it. Migrations are forward-only for this reason.
+- **Editing an applied migration is a silent no-op against production.**
+  `db push` compares versions, not contents — measured. The seeded deck (005,
+  011, 015) is generated, so regenerating one after it has shipped changes the
+  local database and never the remote. Changing shipped data needs a *new*
+  migration. See `docs/deploying.md` §3a.
 - **Public signup must stay disabled on the production project.** The deck is
   genuinely shared — `shared_delete` is `USING (true)`, so any signed-in user
   can delete any card (009). That is right for two trusted people and a

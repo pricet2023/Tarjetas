@@ -115,6 +115,47 @@ Worth knowing before it surprises you.
 
 ---
 
+## 3a. The seed data runs exactly once
+
+All of it — 29,854 word frequencies (005), 3,479 cards (011) and 3,407
+`phrase_phones` rows (015) — lives in **migrations**, not in
+`supabase/seed.sql`. There is no `seed.sql` in this repo, which matters:
+that file re-runs on every `db reset`, whereas a migration is applied once,
+recorded in `supabase_migrations.schema_migrations`, and skipped forever after.
+
+Measured against a throwaway database, rather than assumed:
+
+| | |
+| --- | --- |
+| first `db push` | applies all 15; cards 3,479, word_frequency 29,854, phrase_phones 3,407 |
+| second `db push` | `{"upToDate":true,"migrations":[],"seeds":[]}` — nothing runs |
+
+The three-digit version prefixes (`001_`, not a 14-digit timestamp) are
+accepted and ordered correctly by the CLI, which was the one thing worth
+checking before the first deploy.
+
+`011` and `015` also carry `on conflict … do nothing`, so even a re-run would
+not duplicate. That is belt-and-braces; the migration history is the actual
+guarantee.
+
+### The consequence, which is the part that bites
+
+**Editing an already-applied migration is silently ignored.** `db push`
+compares *versions*, not contents, so a changed file whose number production
+has already seen is never re-read — no error, no warning, `upToDate: true`.
+Measured: a row appended to `015` after it had been applied simply never
+arrived.
+
+This matters here more than in most repos, because **005, 011 and 015 are all
+generated files**. Re-running `npm run db:phones` or `gen-seed-cards.py`
+rewrites a migration production has already applied, and the change will reach
+your local database (via `db reset`) and never reach production. The two then
+disagree, quietly, and the next person to compare them has a bad afternoon.
+
+So: once a migration has shipped, **changing the deck means a new migration**,
+not an edit to an old one. That is what forward-only costs, and it is the same
+reason there is no `db reset` in the workflow.
+
 ## 4. Things that will bite
 
 - **`supabase db push`, never `db reset`.** Reset drops everything — the deck
@@ -122,7 +163,8 @@ Worth knowing before it surprises you.
   Migrations are forward-only for this reason.
 - **`015_seed_phrase_phones.sql` is generated from the local database** (`npm
   run db:phones`), so regenerate it locally and commit the result. Never run
-  the generator against production.
+  the generator against production — and once it has shipped, see §3a: editing
+  it changes nothing in production.
 - **The 197 MB model is per browser, not per user.** Cached by the Cache API
   after the first pronunciation attempt, but that cache is *best-effort*
   storage: the browser may evict it under disk pressure, and Safari wipes
