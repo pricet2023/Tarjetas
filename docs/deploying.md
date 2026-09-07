@@ -24,10 +24,10 @@ push to prod
      └─ web       vercel pull → build → deploy --prod
 ```
 
-`master` is where work happens; nothing deploys from it. Promote with:
+`main` is where work happens; nothing deploys from it. Promote with:
 
 ```bash
-git push origin master:prod
+git push origin main:prod
 ```
 
 Migrations run **before** the web deploy, because the bundle that follows

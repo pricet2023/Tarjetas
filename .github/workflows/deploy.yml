@@ -1,7 +1,7 @@
 # Deploy to production on a push to `prod`.
 #
-# The branch is the trigger and the gate: `master` is where work happens and
-# nothing here runs for it. Promote with `git push origin master:prod`.
+# The branch is the trigger and the gate: `main` is where work happens and
+# nothing here runs for it. Promote with `git push origin main:prod`.
 #
 # Order matters. Migrations go first, because the bundle that follows expects
 # the schema they create — a web deploy that lands before its migration is a

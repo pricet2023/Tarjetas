@@ -4,7 +4,7 @@ Personal Spanish flash-card app. Development is against a **local Supabase
 stack**; production is a **free-tier Supabase project plus Vercel**, deployed
 by GitHub Actions on a push to `prod`. See `docs/deploying.md`.
 
-- Work on `master`. `prod` is the deploy trigger — `git push origin master:prod`.
+- Work on `main`. `prod` is the deploy trigger — `git push origin main:prod`.
 - **`supabase db push`, never `db reset`, against production.** Reset drops the
   deck and every review with it. Migrations are forward-only for this reason.
 - **Public signup must stay disabled on the production project.** The deck is

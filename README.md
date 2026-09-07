@@ -458,7 +458,7 @@ Free-tier Supabase for the database, auth and the `translate` function; Vercel
 for the built SPA; GitHub Actions ties them together on a push to `prod`.
 
 ```bash
-git push origin master:prod
+git push origin main:prod
 ```
 
 Migrations run before the web deploy, the full test suite (model-backed
