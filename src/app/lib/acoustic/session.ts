@@ -42,19 +42,35 @@ export interface SessionSpec {
   vocab: Record<string, number>;
   padToken: string;
   sampleRate: number;
+  /**
+   * wasm threads.
+   *
+   * One in the browser, and not by preference — threaded wasm needs
+   * `SharedArrayBuffer`, which needs the page cross-origin isolated, which
+   * needs COOP/COEP headers the dev server does not send. Node has
+   * `SharedArrayBuffer` unconditionally, so the scorer service passes its core
+   * count here and gets the same kernels on four threads (plan §19.2).
+   *
+   * It stays the *same execution provider* either way. That is the point: the
+   * z-scores in `native-stats.generated.ts` were measured through ORT's wasm
+   * EP, and threading only reorders reductions where an EP swap would change
+   * the operator implementations underneath them.
+   */
+  numThreads?: number;
 }
 
 /**
- * Single-threaded on purpose.
+ * Single-threaded by default, on purpose.
  *
  * Multi-threaded wasm needs `SharedArrayBuffer`, which needs the page to be
  * cross-origin isolated (`COOP`/`COEP`) — headers the Vite dev server does not
  * send. Left at the default, ORT would try, fail, and fall back with a console
- * warning nobody reads. One thread is the honest configuration, and it is
- * what the ~0.9× realtime measurement in the plan's §13 was taken with.
+ * warning nobody reads. One thread is the honest configuration in a browser,
+ * and it is what the ~0.9× realtime measurement in the plan's §13 was taken
+ * with. `SessionSpec.numThreads` is how the server opts out.
  */
-function configureRuntime(): void {
-  ort.env.wasm.numThreads = 1;
+function configureRuntime(numThreads: number): void {
+  ort.env.wasm.numThreads = numThreads;
   // We are already off the main thread; ORT's own proxy worker would be a
   // second hop for nothing.
   ort.env.wasm.proxy = false;
@@ -66,8 +82,9 @@ export async function openSession({
   vocab,
   padToken,
   sampleRate,
+  numThreads = 1,
 }: SessionSpec): Promise<AcousticSession> {
-  configureRuntime();
+  configureRuntime(numThreads);
 
   const labels = labelsByRow(vocab);
   const blank = vocab[padToken];

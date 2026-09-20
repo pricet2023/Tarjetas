@@ -22,7 +22,24 @@ export default defineConfig({
       "@/types": path.resolve(srcDir, "types"),
     },
   },
-  server: { port: 3000 },
+  server: {
+    port: 3000,
+    /**
+     * The scorer, in development.
+     *
+     * Proxied rather than called on its own origin so the client uses one
+     * relative URL in both environments (`VITE_SCORER_URL=/api/scorer`) and
+     * dev has no CORS story at all. In production that variable holds the
+     * tunnel hostname instead and this proxy is not involved.
+     */
+    proxy: {
+      "/api/scorer": {
+        target: process.env.SCORER_ORIGIN ?? "http://127.0.0.1:8787",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/scorer/, ""),
+      },
+    },
+  },
   build: { outDir: path.resolve(root, "dist"), emptyOutDir: true },
   test: {
     globals: true,

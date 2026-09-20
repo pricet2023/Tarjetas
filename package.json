@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail -n fn,vite -c cyan,magenta \"npm run dev:functions\" \"npm run dev:vite\"",
+    "dev": "concurrently --kill-others-on-fail -n fn,scorer,vite -c cyan,yellow,magenta \"npm run dev:functions\" \"npm run dev:scorer\" \"npm run dev:vite\"",
     "dev:vite": "vite",
     "dev:functions": "npx supabase functions serve",
+    "dev:scorer": "node server/run.mjs",
+    "scorer": "node server/run.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

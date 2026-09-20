@@ -44,7 +44,6 @@ interface FlashCardProps {
   /** Never reviewed in this direction — shown as a corner tag. */
   isNew?: boolean;
   /** Already missed once this session — shown as a corner tag. */
-  retry?: boolean;
   /** Called once the swipe-out animation has finished. */
   onSwipe(knew: boolean): void;
 }
@@ -76,7 +75,7 @@ interface Gesture {
  * answering. React state is only used for things that genuinely change the
  * tree: the flip, the reveal counter and the leaving animation.
  */
-export function FlashCard({ card, promptSide, isNew, retry, onSwipe }: FlashCardProps) {
+export function FlashCard({ card, promptSide, isNew, onSwipe }: FlashCardProps) {
   const [flipped, setFlipped] = useState(false);
   // Bumped on every reveal so the reveal animations replay.
   const [reveals, setReveals] = useState(0);
@@ -397,7 +396,6 @@ export function FlashCard({ card, promptSide, isNew, retry, onSwipe }: FlashCard
                 code={frontCode}
                 text={front}
                 isNew={isNew}
-                retry={retry}
                 hintText="tap to reveal"
               />
               <CardFace
@@ -508,7 +506,6 @@ function CardFace({
   revealKey,
   hintText,
   isNew,
-  retry,
 }: {
   label: string;
   /** Two-letter language code, used as the watermark. */
@@ -521,7 +518,6 @@ function CardFace({
   revealKey?: number;
   hintText: string;
   isNew?: boolean;
-  retry?: boolean;
 }) {
   const answer = tone === "answer";
   return (
@@ -586,7 +582,6 @@ function CardFace({
         <span className={cn("label", answer && "text-neon-ice")}>{label}</span>
         <span className="flex gap-1.5">
           {isNew ? <span className="chip border-emerald-400/30 text-neon-mint">new</span> : null}
-          {retry ? <span className="chip border-amber-400/30 text-neon-amber">retry</span> : null}
         </span>
       </header>
 

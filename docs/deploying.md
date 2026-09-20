@@ -21,8 +21,21 @@ push to prod
      ├─ database  supabase link → db push → functions deploy
      │            then asserts public signup is still disabled
      │
+     ├─ scorer    tailscale ssh → infra/deploy.sh
+     │            allowed to fail; see below
+     │
      └─ web       vercel pull → build → deploy --prod
 ```
+
+`scorer` is the one job that **cannot fail the deploy**. It updates the
+pronunciation box (`infra/README.md`), which is an Always Free Oracle instance
+behind a tunnel, and the whole point of `backend.ts`'s fallback is that the app
+does not need it. A dead box is a red check and a degraded feature, never a
+release stuck behind a machine nobody is paid to keep up.
+
+It runs *before* `web` so the box is never the older of the two. `remote.ts`
+refuses a server whose build `id` is not the one the bundle expects, and a skew
+in either direction is the same hard failure on the card.
 
 `main` is where work happens; nothing deploys from it. Promote with:
 
@@ -87,6 +100,20 @@ Repo → Settings → Secrets and variables → Actions:
 | `VERCEL_TOKEN` | vercel.com/account/tokens |
 | `VERCEL_ORG_ID` | `.vercel/project.json` |
 | `VERCEL_PROJECT_ID` | `.vercel/project.json` |
+
+And, for the pronunciation scorer's box. These are optional in the sense that
+everything else deploys without them — the `scorer` job fails, loudly, and the
+release continues. `infra/README.md` §8 is the setup.
+
+| Secret | Where from |
+| --- | --- |
+| `TS_OAUTH_CLIENT_ID` | Tailscale → Settings → OAuth clients, scope `auth_keys:write`, tag `tag:ci` |
+| `TS_OAUTH_SECRET` | likewise |
+| `SCORER_SSH_HOST` | the box's MagicDNS name, e.g. `flash-cards-scorer` |
+
+None of these is key material. Tailscale SSH authorizes against the tailnet
+ACL in `infra/tailscale-acl.json`, so there is no private key in a GitHub
+secret — which is the main reason this is Tailscale and not an SSH tunnel.
 
 ---
 

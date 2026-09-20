@@ -1,0 +1,67 @@
+# The pronunciation scorer (plan §19).
+#
+#   sudo cp infra/scorer.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now scorer
+#
+# Binds 127.0.0.1 only. Everything from outside arrives through Tailscale Funnel,
+# which is a separate unit talking to the same loopback port.
+
+[Unit]
+Description=Flash-cards pronunciation scorer
+Documentation=https://github.com/tobyprice/flash-cards/blob/main/infra/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scorer
+Group=scorer
+WorkingDirectory=/opt/flash-cards
+ExecStart=/usr/bin/node server/run.mjs
+
+# The secrets. Not in the checkout, and not readable by anyone but this unit.
+EnvironmentFile=/etc/flash-cards/scorer.env
+
+Restart=on-failure
+RestartSec=5s
+
+# `run.mjs` exits 0 when there are no weights, which is a real state ("this
+# box was never finished") and not a crash loop to restart into. on-failure
+# leaves it stopped and `systemctl status` says so.
+SuccessExitStatus=0
+
+# The weights are ~197 MB resident and ORT's arena sits on top. 3G leaves
+# room for both and still lets the OOM killer choose this process rather than
+# the box if something runs away.
+MemoryMax=3G
+MemoryHigh=2500M
+
+# Inference is CPU-bound and this box has other jobs (tailscaled, apt). Being
+# nice keeps a long attempt from starving the tunnel that has to answer it.
+Nice=5
+
+# Hardening. The service reads a checkout and a model directory and writes
+# nothing at all, so it can be locked down hard.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RemoveIPC=true
+# Outbound only, and only IP: the JWKS fetch needs DNS and TCP, nothing else.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

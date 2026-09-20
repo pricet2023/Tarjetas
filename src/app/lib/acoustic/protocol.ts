@@ -9,10 +9,18 @@
  * `wav2vec2-xlsr-53-espeak-cv-ft` for the §10.4 fallback should touch
  * `model-source.json`, `inventory.ts`'s label table, and nothing else.
  *
- * Why a Worker and not an edge function: the plan's §3 rejects the server for
- * good reasons, but the practical one is measured — inference is ~0.9× realtime
- * on the wasm backend, so a 2-second utterance occupies a thread for ~1.8
- * seconds. On the main thread that is 90 dropped frames and a locked-up card.
+ * There are two implementations of that contract, and §19 explains why. The
+ * Worker (`worker.ts`) runs the model on the device; the scorer service
+ * (`server/scorer.ts`) runs the identical `session.ts` on a box, for devices
+ * that cannot hold 197 MB of weights resident. §3 rejected the server on the
+ * assumption that every device could, which is the half of it that turned out
+ * to be false — a 3–4 GB Android phone gets the tab killed, so "on-device" is
+ * not a stricter version of the feature there, it is the absence of it.
+ *
+ * Why a Worker at all, rather than the server everywhere: inference is ~0.9×
+ * realtime on the wasm backend, so a 2-second utterance occupies a thread for
+ * ~1.8 seconds. On the main thread that is 90 dropped frames and a locked-up
+ * card.
  */
 
 import source from "./model-source.json";
@@ -88,3 +96,26 @@ export function labelsByRow(vocab: Record<string, number>): string[] {
   }
   return labels;
 }
+
+/**
+ * What `GET /model` on the scorer service answers with.
+ *
+ * The labels come from the *server*, not from HuggingFace, and that is
+ * deliberate: `openSession` throws when a vocabulary and a set of weights
+ * disagree about how many labels there are, and it can only throw on the
+ * machine holding both. A remote client that fetched `vocab.json` itself could
+ * pair last month's labels with this month's weights and every phone would be
+ * wrong by a silent offset (§10.2). Ask the machine that opened the session.
+ */
+export interface RemoteModelInfo {
+  /** `AcousticSource.id` of the build the server actually opened. */
+  id: string;
+  labels: string[];
+  blank: number;
+  vocabSize: number;
+  sampleRate: number;
+}
+
+/** Response headers carrying the posterior matrix's shape. Body is Float32LE. */
+export const FRAMES_HEADER = "x-frames";
+export const VOCAB_HEADER = "x-vocab-size";

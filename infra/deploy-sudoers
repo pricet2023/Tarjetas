@@ -1,0 +1,23 @@
+# Sudoers drop-in for the deploy account (infra/README.md §8).
+#
+#   sudo install -m 0440 -o root -g root \
+#     /opt/flash-cards/infra/deploy-sudoers /etc/sudoers.d/flash-cards-deploy
+#   sudo visudo -c
+#
+# Two grants, both deliberately narrow.
+#
+# `deploy` can act as the `scorer` service account, which owns the checkout and
+# has no login shell. That account is unprivileged and its only secret — the
+# JWT secret — is in /etc/flash-cards/scorer.env, root:scorer 0640, which
+# `deploy` can therefore read *as scorer*. That is accepted: anything that can
+# deploy the code can already make the service print it.
+#
+# `deploy` can restart the unit, and only that unit, and only those verbs. Not
+# `systemctl` generally, which would include `edit` and hand over root.
+#
+# What is deliberately NOT here is a rule naming infra/deploy.sh. That file
+# lives in the checkout and is rewritten by every `git reset --hard origin/prod`
+# below, so granting it root would make a push to `prod` a root escalation.
+
+deploy ALL=(scorer) NOPASSWD: ALL
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart scorer, /usr/bin/systemctl status scorer, /usr/bin/systemctl is-active scorer

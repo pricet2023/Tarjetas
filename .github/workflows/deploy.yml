@@ -16,6 +16,17 @@
 #   VERCEL_ORG_ID           from `.vercel/project.json` after `vercel link`
 #   VERCEL_PROJECT_ID       likewise
 #
+# And, for the pronunciation scorer's box (infra/README.md §8):
+#
+#   TS_OAUTH_CLIENT_ID      Tailscale OAuth client, scope auth_keys:write
+#   TS_OAUTH_SECRET         likewise
+#   SCORER_SSH_HOST         the box's MagicDNS name, e.g. flash-cards-scorer
+#
+# The box has no inbound ports open — not even 22 — so CI reaches it the same
+# way the app does: out through Tailscale and back down the tailnet. There is
+# no SSH key here on purpose: Tailscale SSH authorizes against the tailnet ACL
+# (infra/tailscale-acl.json), so there is no key material to leak or rotate.
+#
 # VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are *not* here: they live in
 # Vercel's own project env vars, which `vercel pull` fetches below. The anon
 # key is designed to be public — it ships in the bundle either way — so there
@@ -137,9 +148,67 @@ jobs:
             exit 1
           fi
 
+  scorer:
+    name: Update the pronunciation scorer
+    needs: verify
+    runs-on: ubuntu-latest
+
+    # A reclaimed Always Free instance, or a tailnet that is down, must not hold
+    # up the app. §19.6 says one box and no failover, and `backend.ts` takes
+    # that seriously — a device that can run the model itself falls back on its
+    # own. So a dead box here is a red check and a degraded feature, never a
+    # stuck release. `continue-on-error` still lets `web` run.
+    continue-on-error: true
+
+    # `web` needs this job, so the box is never the older of the two.
+    # `remote.ts` refuses a server whose build `id` is not the one the bundle
+    # expects, and a skew in either direction is the same failure on the card.
+    #
+    # No checkout: the box pulls `prod` itself, and `deploy.sh` checks what it
+    # is serving against the checkout it just took.
+    steps:
+      # There may be no box yet. Skipping cleanly rather than failing is the
+      # point: `continue-on-error` above means a red check here is *information*
+      # — the box is down and pronunciation is degraded — and a check that is
+      # red for a reason nobody intends to fix is one you stop reading. With no
+      # `SCORER_SSH_HOST` there is simply nothing to deploy to, and every device
+      # runs the model itself, which is the pre-§19 behaviour (README §7).
+      - name: Is there a box to deploy to?
+        id: box
+        env:
+          SSH_HOST: ${{ secrets.SCORER_SSH_HOST }}
+        run: |
+          if [ -n "$SSH_HOST" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No SCORER_SSH_HOST secret set — no scorer box to update."
+            echo "::notice::Pronunciation runs on-device everywhere. See infra/README.md."
+          fi
+
+      # Ephemeral: the node removes itself from the tailnet when the job ends.
+      # Without that you collect a dead runner per deploy until the free tier's
+      # device limit stops the next one.
+      - name: Join the tailnet
+        if: steps.box.outputs.configured == 'true'
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      # No key and no known_hosts. Tailscale SSH checks the runner's tailnet
+      # identity against the `ssh` block of infra/tailscale-acl.json, which
+      # allows tag:ci to be `deploy` on tag:scorer and nothing else.
+      - name: Pull, reinstall, restart
+        if: steps.box.outputs.configured == 'true'
+        env:
+          SSH_HOST: ${{ secrets.SCORER_SSH_HOST }}
+        run: sudo tailscale ssh "deploy@$SSH_HOST" /opt/flash-cards/infra/deploy.sh
+
   web:
     name: Build and deploy the app
-    needs: database
+    needs: [database, scorer]
     runs-on: ubuntu-latest
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}

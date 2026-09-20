@@ -28,14 +28,20 @@ const SIDES: Record<Direction, Side[]> = {
 };
 
 /**
- * Cap on unseen cards per deck — except in pronunciation mode.
+ * How many of a deck's slots are reserved for unseen cards.
  *
- * The cap exists so a batch of new *material* can't swamp a session. In
- * pronunciation mode nothing is new material: the words are ones you are
- * already learning, and only the direction has never been asked, so every card
- * in the deck reads as unseen and the cap would deal a deck of five.
+ * Since 016 this is a reservation rather than a cap on a shared pool: the new
+ * cards get these slots outright instead of losing them to overdue cards in
+ * the race. Half a deck, so the 3,479-card seeded portfolio is reachable in a
+ * few hundred sessions rather than seven hundred, while leaving half for
+ * review. Raise it to see more of the deck, lower it to drill what you have.
+ *
+ * In pronunciation mode nothing is new *material*: the words are ones you are
+ * already learning and only the direction has never been asked, so every card
+ * reads as unseen and reserving half the deck would halve it.
  */
-const newLimitFor = (direction: Direction): number => (direction === "pronounce" ? DECK_SIZE : 5);
+const newLimitFor = (direction: Direction): number =>
+  direction === "pronounce" ? DECK_SIZE : DECK_SIZE / 2;
 
 const keyOf = (e: DeckEntry) => `${e.card.id}:${e.promptSide}`;
 
@@ -45,14 +51,12 @@ export function Study() {
   const [error, setError] = useState<string | null>(null);
   const [direction, setDirection] = useState<Direction>("mixed");
   const [dealt, setDealt] = useState(0);
-  // Scored on first attempt only: a card you fail then get right on the
-  // requeue counts as one miss, not one miss and one hit.
+  // Every card is a first attempt: since 016 a card is asked once per session
+  // and the queue only ever shrinks, so there is no retry to discount.
   const [score, setScore] = useState({ knew: 0, total: 0 });
-  const attempted = useRef(new Set<string>());
-  // Counts card presentations, not cards. Failing the last card in the queue
-  // requeues it to position 0, so the card identity alone doesn't change and
-  // <FlashCard> would keep its mid-swipe state instead of resetting. Folding
-  // this into its key guarantees a fresh card on every answer.
+  // Counts card presentations, not cards, and is folded into the card's key so
+  // that <FlashCard> is remounted on every answer rather than keeping its
+  // mid-swipe state.
   const [turn, setTurn] = useState(0);
   // Longest and current run of correct first attempts, for the HUD.
   const [streak, setStreak] = useState({ current: 0, best: 0 });
@@ -77,7 +81,6 @@ export function Study() {
       setQueue(deck);
       setDealt(deck.length);
       setScore({ knew: 0, total: 0 });
-      attempted.current = new Set();
       setTurn(0);
       setStreak({ current: 0, best: 0 });
       setLastMs(null);
@@ -104,19 +107,15 @@ export function Study() {
   const answer = (knew: boolean, attempt: Attempt | null = null) => {
     if (!current) return;
     const responseMs = Date.now() - shownAt.current;
-    const key = keyOf(current);
 
     setLastMs(responseMs);
-    if (!attempted.current.has(key)) {
-      attempted.current.add(key);
-      setScore((s) => ({ knew: s.knew + (knew ? 1 : 0), total: s.total + 1 }));
-      setStreak((s) => {
-        const next = knew ? s.current + 1 : 0;
-        return { current: next, best: Math.max(s.best, next) };
-      });
-    }
+    setScore((s) => ({ knew: s.knew + (knew ? 1 : 0), total: s.total + 1 }));
+    setStreak((s) => {
+      const next = knew ? s.current + 1 : 0;
+      return { current: next, best: Math.max(s.best, next) };
+    });
 
-    setQueue((q) => advance(q, knew));
+    setQueue((q) => advance(q));
     setTurn((t) => t + 1);
     pronunciation.reset();
 
@@ -164,8 +163,6 @@ export function Study() {
 
   if (!current) return <Summary score={score} streak={streak} dealt={dealt} onAgain={() => void load()} />;
 
-  const retry = attempted.current.has(keyOf(current));
-
   return (
     <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
       <section className="flex min-w-0 flex-col gap-4 lg:min-h-[calc(100dvh-12.5rem)]">
@@ -192,7 +189,6 @@ export function Study() {
               key={`${keyOf(current)}:${turn}`}
               card={current.card}
               isNew={current.isNew}
-              retry={retry}
               pronunciation={pronunciation}
               onAnswer={answer}
             />
@@ -202,7 +198,6 @@ export function Study() {
               card={current.card}
               promptSide={current.promptSide}
               isNew={current.isNew}
-              retry={retry}
               onSwipe={answer}
             />
           )}
@@ -274,7 +269,7 @@ export function Study() {
           </div>
         </div>
 
-        <CardIntel entry={current} retry={retry} />
+        <CardIntel entry={current} />
         <NextUp entries={queue.slice(1, 5)} className="sm:col-span-2 lg:col-span-1" />
       </aside>
     </div>
@@ -312,7 +307,7 @@ function NextUp({ entries, className }: { entries: DeckEntry[]; className?: stri
 }
 
 /** Lifetime and scheduler detail for the card on screen. */
-function CardIntel({ entry, retry }: { entry: DeckEntry; retry: boolean }) {
+function CardIntel({ entry }: { entry: DeckEntry }) {
   const { card, promptSide, weight, isNew } = entry;
   const mastery = card.timesSeen ? card.timesKnown / card.timesSeen : 0;
 
@@ -323,7 +318,6 @@ function CardIntel({ entry, retry }: { entry: DeckEntry; retry: boolean }) {
       <div className="mb-3 flex flex-wrap gap-1.5">
         <span className="chip border-neon-cyan/30 text-neon-ice">{sideLabel(promptSide)}</span>
         {isNew ? <span className="chip border-emerald-400/30 text-neon-mint">new</span> : null}
-        {retry ? <span className="chip border-amber-400/30 text-neon-amber">retry</span> : null}
       </div>
 
       <div className="space-y-3">

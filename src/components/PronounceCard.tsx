@@ -34,13 +34,12 @@ import type { Card } from "@/types/cards";
 export interface PronounceCardProps {
   card: Card;
   isNew: boolean;
-  retry: boolean;
   pronunciation: UsePronunciation;
   /** Called on "next": the verdict, and the attempt behind it when there was one. */
   onAnswer(knew: boolean, attempt: Attempt | null): void;
 }
 
-export function PronounceCard({ card, isNew, retry, pronunciation, onAnswer }: PronounceCardProps) {
+export function PronounceCard({ card, isNew, pronunciation, onAnswer }: PronounceCardProps) {
   const { model, recorder, scoring, attempt, error, arm, start, stop, reset } = pronunciation;
 
   // G2P is pure and cheap, but it throws on a card it cannot pronounce (§11),
@@ -121,7 +120,6 @@ export function PronounceCard({ card, isNew, retry, pronunciation, onAnswer }: P
           <span className="label">say it in spanish</span>
           <span className="flex gap-1.5">
             {isNew ? <span className="chip border-emerald-400/30 text-neon-mint">new</span> : null}
-            {retry ? <span className="chip border-amber-400/30 text-neon-amber">retry</span> : null}
           </span>
         </div>
 

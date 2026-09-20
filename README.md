@@ -159,59 +159,54 @@ including how long the card was on screen.
 ### The scheduling algorithm
 
 Cards are drawn by **weighted random sampling**, not ranked — a plain ordering
-would show the same few cards every session. The weight has two halves:
+would show the same few cards every session. Since migration 016 the weight is
+one term:
 
 ```
-weight = urgency x utility
+weight = urgency
 ```
 
 **urgency — how likely you are to have forgotten it.**
 
 ```
-halflife = 10min x 3^streak / (1 + 0.35 x lapses)
+halflife = 1h x 3^min(streak, 7) / (1 + 0.35 x lapses)
 urgency  = 1 - exp(-elapsed / halflife)
 ```
 
 `streak` is consecutive correct answers *by you*, reset by any wrong one. It is
 used in preference to the lifetime `times_known/times_seen` ratio, which can't
-tell 1/1 from 20/20 and still calls a card you've just forgotten 95% known. `lapses`
-counts right-then-wrong transitions, so a card that is *personally* difficult
-keeps a shorter interval even after a fresh streak.
+tell 1/1 from 20/20 and still calls a card you've just forgotten 95% known.
+`lapses` counts right-then-wrong transitions, so a card that is *personally*
+difficult keeps a shorter interval even after a fresh streak.
 
-The resulting ladder, for a card last seen 24 hours ago:
+The resulting ladder of review intervals:
 
-| streak | 0 | 1 | 3 | 5 | 6 | 7 | 8 |
+| streak | 1 | 2 | 3 | 4 | 5 | 6 | 7+ |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| weight | 0.81 | 0.81 | 0.81 | 0.36 | 0.15 | 0.05 | 0.02 |
-
-This replaces a hard "seen today, comes back tomorrow" rule. It gives the same
-effect for cards you *knew* — a card answered correctly drops to ~0.00002 and
-is effectively gone for the day — without exiling the ones you got wrong, and
-without the deck going empty once everything has been seen once.
-
-Note that everything at streak ≤ 4 is saturated at urgency 1.0 after a day, so
-below that the frequency term does the ordering. That's intended for a daily
-habit (anything not yet solid gets reviewed daily) and it's the main knob to
-turn if reviews start feeling too dense.
+| halflife | 1h | 3h | 9h | 27h | 3.4d | 10d | 91d |
 
 **Relearning.** A card whose streak is 0 despite having been reviewed is one
 you got wrong and haven't since fixed. The forgetting curve is the wrong model
 for it — it says "you saw this a minute ago, so you remember it" when you
 demonstrably don't — so those are held at an urgency floor of 0.6 until
-answered correctly. A just-failed card outweighs a just-known one by ~26,000x.
+answered correctly, on a ten-minute halflife rather than the one-hour base.
+That keeps a failed card at the top of the next deck rather than behind the
+new material.
 
-**utility — how much knowing it is worth.**
+**Cooldowns.** Independent of any weighting, and applied first:
 
-Derived from corpus word frequency (migration 005), on the Zipf scale: 7 is a
-function word, ~5 a common noun, ~3 something you'd meet in a novel. Scored on
-the Spanish side, taking the **minimum** across tokens — a phrase is as hard as
-its rarest word, so "el murciélago" scores 3.37 rather than the 5.41 you'd get
-by averaging in the "el".
+- a card is not dealt twice within **one hour**;
+- a card is not dealt more than twice within **six hours**.
 
-Capped at Zipf 6, so function words rank high but not unboundedly high.
-Deliberately a cap rather than a stopword blocklist: if you made a card for
-"ser" you want to learn it, and the streak term retires it after a few correct
-answers anyway.
+Per card, not per direction — being asked "ya" in either direction is still
+being asked "ya".
+
+**Two lanes.** Half the deck is reserved for cards you have never seen
+(`new_limit`, default 10 of 20) and half for review, each filled by its own
+race. The reservation matters: as a plain eligibility cap the new cards simply
+lost every slot to overdue ones, and ten consecutive decks came back with one
+new card each. Whichever lane runs short the other tops the deck up, so a first
+session is a full 20 new cards and a deck is never returned short.
 
 **Other behaviour**
 
@@ -223,21 +218,26 @@ answers anyway.
   arrives long before producing it, so the two are tracked separately and a
   deck picks whichever direction of a card is weaker. One direction per card
   per deck.
-- **New cards** are capped at 5 per deck (`new_limit`). Without it, adding
-  fifty cards means the next session is fifty things you've never met.
-- **In-session requeue.** The deck is dealt once, so a failed card is moved
-  four places back in the session queue (`src/app/lib/session-queue.ts`) — the
-  database weighting decides what enters a session, this decides what happens
-  within one.
-- **Scoring** is on first attempt: failing a card then getting the requeue
-  right counts as one miss, not a miss and a hit.
+- **No in-session retry.** A card is asked once per session and the queue only
+  shrinks (`src/app/lib/session-queue.ts`). The retry is the scheduler's job,
+  an hour later at the earliest. It used to be requeued four places back,
+  indefinitely, which meant a card you couldn't get right came round every
+  fifth card for the whole session.
+- **What was dropped.** The weight used to be `urgency x utility`, where
+  utility was corpus word frequency on the Zipf scale. The two terms were not
+  comparable: urgency saturates near 1.0 for anything not just-answered, while
+  utility spanned 6.7x, so the deck was in effect ranked by how common — which
+  is to say how easy — the Spanish word was. `phrase_zipf` is still there and
+  still an index probe; the scheduler just doesn't consult it.
 
 ### Tuning it
 
-Everything above lives in `supabase/migrations/010_study_deck.sql`, so changing
-the algorithm is a migration and no app deploy. `study_deck` returns each row's
-`weight` and `is_new` alongside the card, which is what the "New"/"Retry" chips
-on the study screen read.
+Everything above lives in `supabase/migrations/016_deck_variety.sql`, so
+changing the algorithm is a migration and no app deploy. The two knobs worth
+reaching for first are the halflife base (reviews too dense or too sparse) and
+`newLimitFor` in `src/pages/Study.tsx` (how fast you work through the deck).
+`study_deck` returns each row's `weight` and `is_new` alongside the card, which
+is what the "New" chip on the study screen reads.
 
 `response_ms` is recorded on every review but not yet used. It's the obvious
 next input — answering correctly after five seconds is much weaker than

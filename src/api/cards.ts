@@ -138,7 +138,11 @@ export async function deleteCard(id: string): Promise<void> {
 
 export interface DeckOptions {
   deckSize?: number;
-  /** Cap on unseen cards in one deck, so new material can't swamp a session. */
+  /**
+   * Deck slots reserved for unseen cards. A reservation, not a cap on a shared
+   * pool: since 016 the new cards get these outright rather than losing them
+   * to overdue cards in the race. Either lane tops up if the other is short.
+   */
   newLimit?: number;
   /** Directions to draw from. Both = the deck picks the weaker one per card. */
   sides?: Side[];
@@ -146,15 +150,15 @@ export interface DeckOptions {
 
 /**
  * Build a study deck. Both the weighting and the choice of direction live in
- * the `study_deck` SQL function — see 010_study_deck.sql for the algorithm.
- * The deck is drawn from every card in the shared portfolio but weighted by
- * the caller's own history, so the two of us get different decks out of the
- * same cards. The app deliberately does no ordering of its own beyond
- * in-session requeues.
+ * the `study_deck` SQL function — see 016_deck_variety.sql for the current
+ * algorithm. The deck is drawn from every card in the shared portfolio but
+ * weighted by the caller's own history, so the two of us get different decks
+ * out of the same cards, and a card cannot be dealt twice within an hour or
+ * more than twice within six. The app does no ordering of its own at all.
  */
 export async function getStudyDeck({
   deckSize = 20,
-  newLimit = 5,
+  newLimit = 10,
   sides = ["english", "spanish"],
 }: DeckOptions = {}): Promise<DeckEntry[]> {
   const { data, error } = await supabase.rpc("study_deck", {

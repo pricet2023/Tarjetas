@@ -9,10 +9,13 @@
  * Everything below the hook is already pure and tested; this is the React
  * seam, and it exists to keep three awkward facts out of the page:
  *
- * 1. **The model is a 197 MB download** (§13.2). It must not be fetched
- *    because someone opened the study screen — only when they choose to
- *    pronounce something — and the first load is a ~200 s wait that needs a
- *    progress bar rather than a spinner.
+ * 1. **The model is a 197 MB download** (§13.2) *when it runs on the device*.
+ *    It must not be fetched because someone opened the study screen — only
+ *    when they choose to pronounce something — and the first load is a ~200 s
+ *    wait that needs a progress bar rather than a spinner. On a device that
+ *    cannot hold it, `loadAcousticBackend` returns the scorer instead and
+ *    there is no download at all (§19) — which is invisible from here, and is
+ *    meant to be.
  * 2. **The microphone is opened once and left open** (§14.1), so arming is a
  *    separate step from recording and both have to happen from a gesture.
  * 3. **G2P throws on a card it cannot pronounce** (§11), by design. A deck of
@@ -27,7 +30,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { loadAcousticModel, type AcousticModel, type LoadOptions } from "@/app/lib/acoustic/model";
+import { loadAcousticBackend } from "@/app/lib/acoustic/backend";
+import { type AcousticModel, type LoadOptions } from "@/app/lib/acoustic/model";
 import { type RecorderDeps, type Recording } from "@/app/lib/audio/recorder";
 import { useRecorder, type UseRecorder } from "@/app/lib/audio/useRecorder";
 import { g2pPhrase, type Pronunciation } from "@/app/lib/phonology/g2p";
@@ -103,7 +107,7 @@ export function prepare(spanish: string): { words: Pronunciation[]; error: strin
 }
 
 export function usePronunciation(deps: PronunciationDeps = {}): UsePronunciation {
-  const load = deps.load ?? loadAcousticModel;
+  const load = deps.load ?? loadAcousticBackend;
   const recorder = useRecorder(deps.recorder ?? {});
 
   const [model, setModel] = useState<ModelStatus>({

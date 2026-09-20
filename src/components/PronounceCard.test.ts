@@ -118,7 +118,7 @@ function render(props: Parameters<typeof PronounceCard>[0]) {
   };
 }
 
-const base = { card, isNew: false, retry: false, onAnswer: vi.fn() };
+const base = { card, isNew: false, onAnswer: vi.fn() };
 
 describe("PronounceCard", () => {
   it("shows the prompt and the target, split into syllables", () => {

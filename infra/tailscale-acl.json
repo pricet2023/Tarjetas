@@ -1,0 +1,56 @@
+// Tailnet policy for the pronunciation scorer's box (infra/README.md §6, §8).
+//
+// Paste into Tailscale admin → Access Controls. It is the whole of the box's
+// access control: there are no ingress rules on the Oracle side, no
+// authorized_keys file for the deploy account, and no SSH key in a GitHub
+// secret. What may reach the box, and as whom, is this file.
+//
+// Two tags. `tag:scorer` is the box; `tag:ci` is the ephemeral node the
+// GitHub Actions runner joins as and then discards.
+{
+  "tagOwners": {
+    "tag:scorer": ["autogroup:admin"],
+    "tag:ci": ["autogroup:admin"]
+  },
+
+  "acls": [
+    // You, from your own devices, for everything.
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:scorer:*"] },
+
+    // CI, to port 22 and nothing else. The scorer's own port is deliberately
+    // absent: the runner has no business talking to 8787, and the public
+    // half of that is served by Funnel, not by the tailnet.
+    { "action": "accept", "src": ["tag:ci"], "dst": ["tag:scorer:22"] }
+  ],
+
+  // Tailscale SSH. The box checks the tailnet identity of the caller against
+  // these rules instead of an authorized_keys file, which is what removes the
+  // private key from CI entirely.
+  "ssh": [
+    // CI may be `deploy`, and only `deploy`. Not root, not ubuntu. Everything
+    // `deploy` is then allowed to do is in infra/deploy-sudoers.
+    {
+      "action": "accept",
+      "src": ["tag:ci"],
+      "dst": ["tag:scorer"],
+      "users": ["deploy"]
+    },
+
+    // You may be yourself or the deploy account, with a check every 12h.
+    // `ubuntu` is the account with real sudo, so it is worth the reauth.
+    {
+      "action": "check",
+      "checkPeriod": "12h",
+      "src": ["autogroup:member"],
+      "dst": ["tag:scorer"],
+      "users": ["ubuntu", "deploy"]
+    }
+  ],
+
+  // Funnel is what puts the scorer on the public internet, which it has to be:
+  // the app runs in a browser on a phone that is not on this tailnet. Without
+  // this attribute `tailscale funnel` refuses to start.
+  "nodeAttrs": [
+    { "target": ["tag:scorer"], "attr": ["funnel"] }
+  ]
+}

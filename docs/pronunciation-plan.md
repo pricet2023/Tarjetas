@@ -43,9 +43,10 @@ without asking.
   `user_id = auth.uid()`. `phone_state` below is the second kind.
 - **`card_reviews` is append-only.** No update or delete policy. Adding
   *nullable* columns is fine and does not disturb this.
-- **The deck weighting stays in SQL** (`study_deck`, migration 010). The client
-  does no ordering beyond the in-session requeue in
-  `src/app/lib/session-queue.ts`.
+- **The deck weighting stays in SQL** (`study_deck`, migration 010; 016 as of
+  the variety rework). The client does no ordering at all — the in-session
+  requeue this used to allow for was removed in 016, and
+  `src/app/lib/session-queue.ts` now only drops the answered card.
 - **`card_state` is keyed on `(card_id, prompt_side)`.** Pronunciation becomes
   a third `prompt_side`, not a new keying scheme.
 - **The metal look is a CSS vocabulary**, not utility soup — `.plate`, `.well`,
@@ -1703,3 +1704,193 @@ the repetitions from a `do $$ ... $$` loop instead.
 | 4 | Score threshold | §15.1 — the measured 5th percentile per phone, plus `PASS_SCORE = 0.8` for the attempt |
 | 5 | Where native audio comes from | §15.2 — FLEURS es_419 |
 | 6 | Merge `ʎ`→`ʝ` and `θ`→`s` | §11 — merged, as recommended |
+
+---
+
+## 19. The scorer service (2026-09-09)
+
+§3 rejected running inference on a server, and this section is where that
+decision gets amended rather than overturned. The four reasons it gave are
+still true; one of its *assumptions* is not.
+
+### 19.1 What changed
+
+§3 assumed the device could hold the model. On the machines the feature was
+built and measured on it can. On a 3–4 GB Android phone it cannot: 197 MB of
+weights are resident for the life of the session, the cold path peaks at
+roughly twice that (`weights.ts` accumulates the chunks and then copies them
+into a second full-size buffer before ORT sees any of it), and the tab is
+killed. On that phone "runs entirely on the device" is not a stricter version
+of the feature. It is the absence of one.
+
+So the claim narrows, on purpose, and the wording in `CLAUDE.md` narrows with
+it: **pronunciation runs on the device wherever the device can hold it.**
+Where it cannot, a scorer service runs the identical model and the identical
+code, and the learner gets working feedback instead of a dead card.
+
+What did *not* change, and what §3 still gets right:
+
+- **The laptop still runs it locally.** No API, no key, no per-use cost — this
+  is a fallback, not a migration, and `VITE_SCORER_URL` unset restores the
+  pre-§19 behaviour exactly.
+- **Streaming is still rejected** (§3). The wire carries a whole utterance.
+- **Transcribe-and-compare is still rejected** (§3), which is what rules out
+  every free hosted speech API: they return words, and this needs a posterior
+  matrix. That is why the box is ours rather than someone's endpoint.
+
+### 19.2 The shape
+
+`protocol.ts` was already written as "the one seam between the app and
+whatever is actually doing the inference", and that is what made this cheap.
+
+```
+                 ┌─ worker.ts ────── session.ts ─┐
+samples ─────────┤                               ├──▶ logProbs ──▶ align ──▶ GOP
+  backend.ts     └─ remote.ts ──HTTP── scorer.ts ─┘        (client, either way)
+```
+
+Both branches satisfy `AcousticModel`, so nothing downstream can tell which
+one it got. Three properties are load-bearing:
+
+- **The server returns log-probabilities, not scores.** No alignment, no GOP,
+  no phonology on the box. All of that stays in the browser where it is
+  already tested and where `native-stats.generated.ts` lives, so there is
+  exactly one implementation of the scoring and the box cannot drift from it.
+- **The server imports the app's own `session.ts`**, through the same
+  `scripts/ts-loader.mjs` the generators use. Not a port, not a copy — the
+  same file. A separately-maintained server implementation is precisely the
+  drift that would make every verdict quietly wrong.
+- **The client checks the build.** `GET /model` returns the source `id` and
+  the labels, and `remote.ts` refuses a server whose `id` is not the one the
+  app expects. A box on last month's weights would return labels that align
+  perfectly well and score against the wrong calibration — a silent failure,
+  so it is made loud.
+
+Labels come from the server rather than from HuggingFace for the same reason:
+`openSession` throws when a vocabulary and a set of weights disagree, and it
+can only throw on the machine holding both (§10.2).
+
+### 19.3 The calibration constraint
+
+**Both sides must run the same execution provider**, not merely the same
+weights. §4.6 z-scores against `native-stats.generated.ts`, and a systematic
+quantization bias cancels only if the reference and the runtime were produced
+the same way. §13.2's "Chrome vs Node: identical" was wasm-vs-wasm and is
+*not* evidence that ORT's native EP agrees.
+
+So the scorer runs `onnxruntime-web/wasm` — the same import the browser uses —
+and the hybrid is safe to mix per device. Measured end to end, through
+`RemoteAcousticModel` against the real service, on the §13 fixture:
+
+```
+aligned : p[3,4) e[6,7) r[18,19) o[21,22)
+§13.2   : p[3,4) e[6,7) r[18,19) o[21,22)
+```
+
+Identical. If the scorer is ever moved to `onnxruntime-node` for speed, that
+is a different EP and `npm run stats:native` must be regenerated against it —
+and then a device and a box no longer produce comparable numbers, so the
+backend would have to be pinned per user rather than chosen per session.
+
+### 19.4 Measured, and the part that did not work
+
+| | |
+| --- | --- |
+| weights resident, Node, from `.models/` | 568 ms |
+| `POST /score`, 0.608 s fixture, end to end | 795 ms |
+| inference, 1 s of audio, 1 thread | ~1250 ms |
+| frames returned for the fixture | 30 — matches §13.2 |
+| alignment vs the on-device result | identical |
+| **ORT wasm with `numThreads > 1` under Node** | **does not start** |
+
+The plan was to take the four cores the box has, since Node has
+`SharedArrayBuffer` unconditionally and the browser's COOP/COEP obstacle does
+not apply. It does not work: ORT's threaded build constructs its workers from
+a URL it then fetches, Node's `fetch` does not do `file:`, and every
+configuration fails identically with
+
+```
+no available backend found. ERR: [wasm] TypeError: fetch failed
+```
+
+Supplying `env.wasm.wasmBinary` fixes the *main* module's lookup — which is
+required, and is what `scorer.ts` does, mirroring `worker.ts`'s `wasmPaths` —
+and does nothing for the workers'. `wasmPaths` as a `file:` URL fails the same
+way. So `numThreads` stays 1, `SessionSpec.numThreads` exists as the knob a
+native-EP follow-up would turn, and **the box is slower than the laptop**.
+
+That is worth being blunt about, because it inverts the usual reason for a
+server: this one is not for speed. It is for the 197 MB. Anyone reaching for
+`onnxruntime-node` to fix the speed should read §19.3 first and budget for a
+`stats:native` regeneration.
+
+### 19.5 Choosing, and what it costs
+
+`backend.ts` decides in three steps: an explicit per-device preference, then
+`navigator.deviceMemory <= 4`, then failure. The heuristic is the weak part
+and is known to be — Chrome and the Android WebView report `deviceMemory`,
+Safari and Firefox report nothing, so it catches the Samsung and misses an old
+iPhone entirely. That is what the third step is for: a device path that throws
+falls through to the scorer rather than telling someone their phone cannot do
+pronunciation.
+
+Auth is a Supabase access token verified on the box, HS256 or JWKS depending
+on how the project signs (`server/auth.ts`), for the same reason `translate`
+has `verify_jwt = true`. An open endpoint doing 1.25 s of CPU per request is a
+free denial-of-service and, once found, free inference.
+
+### 19.6 Not done
+
+- **`weights.ts` still double-buffers the cold download.** `chunks` plus a
+  second full-size `Uint8Array` is a ~394 MB peak before ORT parses anything,
+  which is very likely what kills the phone on the download that was supposed
+  to be a one-off. Sizing one buffer from `source.bytes` roughly halves it.
+  Worth doing regardless of the scorer — it is the difference between a device
+  that fails at step one and one that gets a fair try.
+- **Nothing prefetches.** `arm()` still fires on the first press-and-hold, so
+  the on-device path pays its ~200 s at the worst possible moment even though
+  `SIDES.pronounce` makes the need certain the moment the mode is chosen.
+- **`navigator.storage.persist()` is still not called**, so the Cache API
+  entry is evictable and the "once per device" download is not.
+- **No UI for the preference.** `writePreference` exists and nothing calls it.
+- **The scorer is one box with no failover**, which is the right amount of
+  infrastructure for two people and worth writing down as a choice. §19.7 is
+  what that choice cost and what was done about it.
+
+### 19.7 What happens when the box isn't there (2026-09-20)
+
+§19.6 recorded "one box with no failover" as an acceptable choice. It is, for
+the box. It was not acceptable for the *client*, because the fallback in
+§19.5's rule 3 only ran one way: a device that failed locally fell through to
+the scorer, and a device routed to the scorer had nowhere to go. An Always Free
+Oracle instance is reclaimed when idle (`infra/README.md` §1) and two people
+studying does not clear the utilisation bar, so "the box isn't there" is a
+normal state, not an incident.
+
+`loadAcousticBackend` now falls through in both directions, and `routeBackend`
+exists to keep the *reason* for a routing decision, because that is what
+decides whether the other path is worth trying:
+
+| Routed to the scorer by | Scorer fails | Why |
+| --- | --- | --- |
+| an explicit preference | try the device | a preference is not a verdict about memory |
+| a browser that won't report memory | try the device | Safari and Firefox say nothing; that is not evidence |
+| `deviceMemory <= 4` | report it | the one case where the device *was* measured unable |
+
+The last row is the asymmetry worth defending. Falling back there would hand a
+3–4 GB phone the ~394 MB cold peak that §19.6 says kills the tab, so it trades
+a clear message for a crashed page. Rule 3's original direction is unchanged.
+
+Two things follow from this that are not in the client:
+
+- **The deploy can't be blocked by the box.** The `scorer` job in the deploy
+  workflow is `continue-on-error`, because a machine nobody is paid to keep up
+  must not hold a release. It runs before the web deploy so the box is never
+  the older of the two.
+- **`deploy.sh` asserts the build `id`**, not just the health check. A restart
+  that comes back serving stale weights passes every other check and fails at
+  §19.2's guard, in front of a learner, rather than in CI.
+
+Still not done: §19.6's `weights.ts` double-buffer, which is the thing that
+would let some of those phones hold the model in the first place and make this
+whole branch rarer.
