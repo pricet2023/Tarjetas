@@ -25,8 +25,6 @@
  * to the device path, which is exactly the behaviour before §19.
  */
 
-import { supabase } from "@/app/lib/supabase";
-
 import { loadAcousticModel, type AcousticModel, type LoadOptions } from "./model";
 import { loadRemoteAcousticModel, type RemoteOptions } from "./remote";
 
@@ -208,8 +206,15 @@ function message(thrown: unknown): string {
  * `getSession` refreshes an expired token rather than handing back the stale
  * one, which matters because a study session comfortably outlives an access
  * token and the failure would otherwise be a 401 twenty cards in.
+ *
+ * Imported here rather than at the top of the file on purpose. `supabase.ts`
+ * throws at module scope when `VITE_SUPABASE_URL` is unset, so a static import
+ * would make *loading* this module require a configured project — which is not
+ * true of anything it does except this function, and which breaks any test
+ * that reaches `usePronunciation` without an `.env`.
  */
 async function accessToken(): Promise<string | null> {
+  const { supabase } = await import("@/app/lib/supabase");
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }
