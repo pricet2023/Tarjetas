@@ -5,37 +5,37 @@ import { advance } from "./session-queue";
 describe("advance", () => {
   const deck = ["a", "b", "c", "d", "e", "f", "g"];
 
-  it("drops a card that was known", () => {
-    expect(advance(deck, true)).toEqual(["b", "c", "d", "e", "f", "g"]);
+  it("drops the answered card", () => {
+    expect(advance(deck)).toEqual(["b", "c", "d", "e", "f", "g"]);
   });
 
-  it("moves a failed card back by the gap", () => {
-    expect(advance(deck, false, 4)).toEqual(["b", "c", "d", "e", "a", "f", "g"]);
+  it("drops a failed card too, rather than requeueing it", () => {
+    // The whole point of 016: a card is asked once per session. The retry is
+    // the scheduler's job now, an hour later at the earliest.
+    expect(advance(deck)).not.toContain("a");
   });
 
-  it("puts a failed card last when fewer than gap cards remain", () => {
-    expect(advance(["a", "b", "c"], false, 4)).toEqual(["b", "c", "a"]);
-  });
-
-  it("retries the last card of a deck rather than ending the session", () => {
-    expect(advance(["a"], false)).toEqual(["a"]);
-  });
-
-  it("ends the session when the last card is known", () => {
-    expect(advance(["a"], true)).toEqual([]);
+  it("ends the session on the last card", () => {
+    expect(advance(["a"])).toEqual([]);
   });
 
   it("is a no-op on an empty queue", () => {
-    expect(advance([], true)).toEqual([]);
-    expect(advance([], false)).toEqual([]);
+    expect(advance([])).toEqual([]);
   });
 
-  it("keeps every card until it is answered correctly", () => {
-    // Fail 'a' repeatedly: it must never be lost from the queue.
-    let q = [...deck];
-    for (let i = 0; i < 20; i++) {
-      q = q[0] === "a" ? advance(q, false) : advance(q, true);
-      expect(q).toContain("a");
+  it("empties a deck in exactly one pass", () => {
+    let q: string[] = [...deck];
+    for (let i = 0; i < deck.length; i++) q = advance(q);
+    expect(q).toEqual([]);
+  });
+
+  it("never lengthens the queue", () => {
+    // A queue that can grow is a session that can repeat a card.
+    let q: string[] = [...deck];
+    while (q.length > 0) {
+      const before = q.length;
+      q = advance(q);
+      expect(q.length).toBe(before - 1);
     }
   });
 });
