@@ -107,6 +107,13 @@ docs/pronunciation-plan.md  the design, the measurements, and what was rejected
   `scripts/gen-word-frequency.py` / `scripts/gen-seed-cards.py` rather than
   editing their megabyte of INSERTs by hand. Both want
   `.venv/bin/pip install wordfreq verbecc`.
+- **Conjugation prompts don't name the verb** (017). "they will eat", not
+  "they will eat (comer)" — recalling which verb is half the card. 017
+  rewrote 011's prompts in place (ids, and so progress, kept); English-only
+  collisions carry a sense, not a name: `(permanent)`/`(temporary)`,
+  `(auxiliary)`/`(possession)`, `(a fact)`/`(a person or place)`, and
+  comprender says "comprehend". Cards added by a later migration get their
+  phones in a further one: `npm run db:phones -- --missing=NNN_name` (018).
 - **The seed deck's conjugations are looked up, not derived** (011). Spanish
   forms come from `verbecc`'s tables, and `gen-seed-cards.py` asserts 99
   hand-verified irregulars before it writes anything — if a library upgrade

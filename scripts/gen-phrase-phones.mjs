@@ -4,10 +4,19 @@
 // sounds in it (014).
 //
 //   npm run db:phones          # after a db:reset, before the next one
+//   npm run db:phones -- --missing=018_chunk_phrase_phones
 //
 // Output: supabase/migrations/015_seed_phrase_phones.sql — a generated file,
 // the same shape as 005 (word frequencies) and 011 (the seed deck). Rerun it;
 // do not edit it.
+//
+// **`--missing=NNN_name`** is for cards added by a later migration. 015 has
+// shipped, and regenerating a shipped migration never reaches production
+// (docs/deploying.md §3a), so a new batch of cards gets its phones in a *new*
+// migration: only the faces that have no `phrase_phones` row yet, written to
+// `supabase/migrations/NNN_name.sql`. Run it after the migration that adds the
+// cards and before the one it writes, i.e. against a database that has the
+// first and not the second.
 //
 // **Why a migration rather than a client backfill.** The point of 014 is cold
 // start: a card the learner has never pronounced should already be known to be
@@ -36,7 +45,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outPath = resolve(root, "supabase/migrations/015_seed_phrase_phones.sql");
+const missingArg = process.argv.slice(2).find((arg) => arg.startsWith("--missing="));
+const missing = missingArg?.slice("--missing=".length);
+if (missingArg !== undefined && !/^\d{3}_\w+$/.test(missing)) {
+  throw new Error(`--missing wants a migration name like 018_chunk_phrase_phones, got ${missing}`);
+}
+const outPath = resolve(root, `supabase/migrations/${missing ?? "015_seed_phrase_phones"}.sql`);
 
 /** Bumped when a G2P rule changes, so 014's `g2p_version` can find stale rows. */
 const G2P_VERSION = 1;
@@ -47,7 +61,8 @@ async function main() {
   const { g2pPhrase } = await import("@/app/lib/phonology/g2p");
 
   const phrases = deckPhrases();
-  console.log(`[phones] ${phrases.length} distinct card faces in the deck`);
+  console.log(`[phones] ${phrases.length} distinct card faces ${missing ? "without phones" : "in the deck"}`);
+  if (phrases.length === 0) throw new Error("Nothing to do; refusing to write an empty migration.");
 
   const rows = [];
   const failed = [];
@@ -93,7 +108,11 @@ async function main() {
  * that could occur inside one would quietly cut a phrase in half.
  */
 function deckPhrases() {
-  const sql = "select distinct spanish from public.cards order by spanish";
+  const sql = missing
+    ? "select distinct c.spanish from public.cards c " +
+      "where not exists (select 1 from public.phrase_phones p where p.phrase = c.spanish) " +
+      "order by c.spanish"
+    : "select distinct spanish from public.cards order by spanish";
   let out;
   try {
     out = execFileSync(
@@ -117,8 +136,13 @@ function deckPhrases() {
 /** ASCII RECORD SEPARATOR — see `deckPhrases`. */
 const RS = "\u001e";
 
-/** The db container's name, which Supabase derives from the project id. */
+/**
+ * The db container's name, which Supabase derives from the project id.
+ * `SUPABASE_DB_CONTAINER` overrides it, for running against a scratch
+ * database when another project's stack holds the ports.
+ */
 function containerName() {
+  if (process.env.SUPABASE_DB_CONTAINER) return process.env.SUPABASE_DB_CONTAINER;
   const config = resolve(root, "supabase", "config.toml");
   const id = /^\s*project_id\s*=\s*"([^"]+)"/m.exec(readFileSync(config, "utf8"))?.[1];
   if (!id) throw new Error(`No project_id in ${config}`);
@@ -130,11 +154,14 @@ const array = (phones) => `array[${phones.map(quote).join(",")}]::text[]`;
 
 function emit(rows, total, failed) {
   const header = `-- ---------------------------------------------------------------------------
--- The seed deck's card faces, in phonemes.
+-- ${missing ? "Card faces added since 015, in phonemes" : "The seed deck's card faces, in phonemes"}.
 --
 -- GENERATED FILE — do not edit by hand. Regenerate with:
---     npm run db:phones
---
+--     npm run db:phones${missing ? ` -- --missing=${missing}` : ""}
+--${missing ? `
+-- Only the faces with no phrase_phones row at generation time: the cards the
+-- migration before this one added. Same derivation, same shape, as 015.
+--` : ""}
 -- ${rows.length} of ${total} distinct card faces, produced by the app's own
 -- \`g2pPhrase\` (src/app/lib/phonology/g2p.ts) at version ${G2P_VERSION}.
 -- ${failed.length} face${failed.length === 1 ? "" : "s"} G2P refused to pronounce, which the app

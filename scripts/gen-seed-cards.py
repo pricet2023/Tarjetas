@@ -48,7 +48,12 @@ Prompt side carries the verb and, for the two past tenses, the tense:
     "I used to speak (hablar, imperfect)"  ->  "yo hablaba"
 
 The infinitive is in the prompt on purpose: the skill being drilled is the
-conjugation, not the vocabulary. The infinitive cards themselves are the other
+conjugation, not the vocabulary. **017 has since reversed that in production**:
+it rewrites these prompts in place without the infinitive ("I spoke
+(preterite)"), and gives the ser/estar, haber/tener, saber/conocer and
+entender/comprender pairs a sense instead ("I am (permanent)"). This script
+still emits the 011 shape because 011 has shipped — see docs/deploying.md §3a.
+New verbs belong in a new migration, in 017's shape. The infinitive cards themselves are the other
 way round ("to speak" -> "hablar"), so those glosses have to be unique on their
 own — hence `inf_en` on ser/estar, saber/conocer and the rest of the pairs that
 share an English word.
