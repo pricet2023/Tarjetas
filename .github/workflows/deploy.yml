@@ -124,8 +124,11 @@ jobs:
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
+      # --use-api bundles on Supabase's side. Without it the CLI pulls the
+      # edge-runtime image from ghcr.io to bundle locally, and that pull is
+      # rate-limited on shared Actions runners (`toomanyrequests`).
       - name: Deploy edge functions
-        run: supabase functions deploy translate
+        run: supabase functions deploy translate --use-api
 
       # The deck is shared: `shared_delete` is `USING (true)`, so *any* signed-in
       # user can delete *any* card. That is the right policy for two people
